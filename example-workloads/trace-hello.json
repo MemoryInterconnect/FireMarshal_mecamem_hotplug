@@ -1,0 +1,7 @@
+{
+  "name" : "trace-hello",
+  "base" : "br-base.json",
+  "spike-args" : "--device=trace_encoder_ctrl --trace l ",
+  "overlay" : "overlay",
+  "host-init" : "host-init.sh"
+}
