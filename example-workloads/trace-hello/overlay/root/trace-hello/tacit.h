@@ -6,7 +6,7 @@
 #include <unistd.h>
 
 #define TRACE_IOC_MAGIC      't'
-#define TRACE_IOC_ENABLE     _IO(TRACE_IOC_MAGIC, 0)  /* arg: 1=on, 0=off */
+#define TRACE_IOC_ENABLE     _IO(TRACE_IOC_MAGIC, 0)  
 #define TRACE_IOC_DISABLE    _IO(TRACE_IOC_MAGIC, 1)
 
 static inline int tacit_open(void) {
