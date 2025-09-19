@@ -3,5 +3,12 @@
   "base" : "br-base.json",
   "spike-args" : "--device=trace_encoder_ctrl --trace l ",
   "overlay" : "overlay",
-  "host-init" : "host-init.sh"
+  "host-init" : "host-init.sh",
+  "jobs" : [
+    {
+      "name" : "run-chores",
+      "outputs" : [ "/root/chores/driver_map.txt", "/root/chores/jump_label_patch_map.txt" ],
+      "run" : "run-chores.sh"
+    }
+  ]
 }
