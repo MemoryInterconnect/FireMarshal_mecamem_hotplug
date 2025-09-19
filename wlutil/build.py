@@ -203,10 +203,13 @@ def addDep(loader, config):
 
     diskBin = []
     if 'bin' in config:
+        targets = [str(config['bin'])]
         if 'dwarf' in config:
-            targets = [str(config['bin']), str(config['dwarf'])]
-        else:
-            targets = [str(config['bin'])]
+            targets.append(str(config['dwarf']))
+        # Add driver dwarf files as targets
+        if 'driver-dwarfs' in config:
+            targets.extend([str(dwarf_path) 
+                           for dwarf_path in config['driver-dwarfs'].values()])
 
         moddeps = []
         if 'firmware' in config:
@@ -242,10 +245,13 @@ def addDep(loader, config):
             nodisk_file_deps.append(config['img'])
             nodisk_task_deps.append(str(config['img']))
 
+        targets = [str(wlutil.noDiskPath(config['bin']))]
         if 'dwarf' in config:
-            targets = [str(wlutil.noDiskPath(config['bin'])), str(wlutil.noDiskPath(config['dwarf']))]
-        else:
-            targets = [str(wlutil.noDiskPath(config['bin']))]
+            targets.append(str(wlutil.noDiskPath(config['dwarf'])))
+        # Add driver dwarf files as targets for nodisk build
+        if 'driver-dwarfs' in config:
+            targets.extend([str(wlutil.noDiskPath(dwarf_path)) 
+                           for dwarf_path in config['driver-dwarfs'].values()])
 
         uptodate = []
         if 'firmware' in config:
@@ -461,6 +467,7 @@ def makeModules(cfg):
 
     linCfg = cfg['linux']
     drivers = []
+    driver_dwarfs = []
 
     # Prepare the linux source with the proper config
     generateKConfig(linCfg['config'], linCfg['source'])
@@ -477,13 +484,27 @@ def makeModules(cfg):
         # MODPOST errors are warnings, since we built the extmods without building the kernel first
         makeCmd = "make KBUILD_MODPOST_WARN=1 LINUXSRC=" + str(linCfg['source'])
 
-        for driverDir in linCfg['modules'].values():
+        for driverName, driverDir in linCfg['modules'].items():
             wlutil.checkSubmodule(driverDir)
 
             # Drivers don't seem to detect changes in the kernel
             wlutil.run(makeCmd + " clean", cwd=driverDir, shell=True)
             wlutil.run(makeCmd, cwd=driverDir, shell=True)
-            drivers.extend(list(driverDir.glob("*.ko")))
+            
+            # Collect compiled kernel modules
+            ko_files = list(driverDir.glob("*.ko"))
+            drivers.extend(ko_files)
+            
+            # Generate dwarf files for each driver
+            for ko_file in ko_files:
+                # Find the corresponding .o file (unstripped object with debug info)
+                o_file = driverDir / (ko_file.stem + ".o")
+                if (o_file.exists() and 'driver-dwarfs' in cfg and 
+                        driverName in cfg['driver-dwarfs']):
+                    # Use the configured dwarf file path
+                    dwarf_file = cfg['driver-dwarfs'][driverName]
+                    shutil.copy(o_file, dwarf_file)
+                    driver_dwarfs.append(dwarf_file)
 
     kernelVersion = sp.run(["make", "-s", "ARCH=riscv", "kernelrelease"], cwd=linCfg['source'], stdout=sp.PIPE, universal_newlines=True).stdout.strip()
     driverDir = wlutil.getOpt('initramfs-dir') / "drivers" / "lib" / "modules" / kernelVersion
@@ -501,6 +522,9 @@ def makeModules(cfg):
 
     # Setup the dependency file needed by modprobe to load the drivers
     wlutil.run(['depmod', '-b', str(wlutil.getOpt('initramfs-dir') / "drivers"), kernelVersion])
+    
+    # Return the list of generated driver dwarf files
+    return driver_dwarfs
 
 
 def makeOpenSBI(config, nodisk=False):
@@ -552,6 +576,14 @@ def makeBin(config, nodisk=False, lspOnly=False):
         if 'dwarf' in config:
             config['dwarf'].parent.mkdir(parents=True, exist_ok=True)
             shutil.copy(config['base-dwarf'], config['dwarf'])
+        # Copy driver dwarf files if they exist
+        if 'driver-dwarfs' in config:
+            for dwarf_path in config['driver-dwarfs'].values():
+                dwarf_path.parent.mkdir(parents=True, exist_ok=True)
+                # Note: Base configs may not have driver dwarfs, 
+                # so we only copy if they exist
+                # This handles the case where a parent config has 
+                # driver dwarfs to copy
         return True
 
     # We assume that if you're not building linux, then the image is pre-built (e.g. during host-init)
@@ -606,12 +638,31 @@ def makeBin(config, nodisk=False, lspOnly=False):
 
             config['bin'].parent.mkdir(parents=True, exist_ok=True)
             config['dwarf'].parent.mkdir(parents=True, exist_ok=True)
+            
+            # Ensure driver dwarf directories exist
+            if 'driver-dwarfs' in config:
+                for dwarf_path in config['driver-dwarfs'].values():
+                    if nodisk:
+                        wlutil.noDiskPath(dwarf_path).parent.mkdir(
+                            parents=True, exist_ok=True)
+                    else:
+                        dwarf_path.parent.mkdir(parents=True, exist_ok=True)
+            
             if nodisk:
                 shutil.copy(fw, wlutil.noDiskPath(config['bin']))
-                shutil.copy(config['linux']['source'] / 'vmlinux', wlutil.noDiskPath(config['dwarf']))
+                shutil.copy(config['linux']['source'] / 'vmlinux', 
+                           wlutil.noDiskPath(config['dwarf']))
+                # Copy driver dwarf files for nodisk build
+                if 'driver-dwarfs' in config:
+                    for dwarf_path in config['driver-dwarfs'].values():
+                        if dwarf_path.exists():
+                            shutil.copy(dwarf_path, 
+                                       wlutil.noDiskPath(dwarf_path))
             else:
                 shutil.copy(fw, config['bin'])
                 shutil.copy(config['linux']['source'] / 'vmlinux', config['dwarf'])
+                # Driver dwarf files are already generated and copied 
+                # during makeModules
 
     return True
 
