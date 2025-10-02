@@ -9,6 +9,10 @@
       "name" : "run-chores",
       "outputs" : [ "/root/chores/driver_map.txt", "/root/chores/jump_label_patch_map.txt" ],
       "run" : "run-chores.sh"
+    },
+    {
+      "name" : "trace-hello",
+      "command" : "./trace-hello/trace-submit ./trace-hello/hello"
     }
   ]
 }

@@ -2,4 +2,5 @@
 
 echo "Building trace-hello workload"
 cd overlay/root/trace-hello
-make
+make hello
+make trace-submit

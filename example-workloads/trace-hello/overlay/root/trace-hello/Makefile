@@ -5,11 +5,14 @@ CFLAGS := -O3 -static -DRISCV
 #CC = gcc
 #CFLAGS := -O3 -std=gnu99
 
-trace-hello: trace-hello.c tacit.h
-	${CC} ${CFLAGS} -o trace-hello trace-hello.c
+trace-submit: trace-submit.c tacit.h
+	${CC} ${CFLAGS} -o trace-submit trace-submit.c
 
-dump: trace-hello
-	${DUMP} -D trace-hello > trace-hello.dump
+hello: hello.c 
+	${CC} ${CFLAGS} -o hello hello.c
+
+dump: ${TARGET}
+	${DUMP} -D ${TARGET} > ${TARGET}.dump
 
 clean:
-	rm -f trace-hello
+	rm -f hello trace-submit
