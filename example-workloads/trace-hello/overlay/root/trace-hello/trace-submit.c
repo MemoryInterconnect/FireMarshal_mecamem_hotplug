@@ -47,22 +47,16 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  printf("calling execvp for %s\n", argv[1]);
+  if (tacit_enable(fd) < 0) {
+      fprintf(stderr, "failed to enable tacit\n");
+      return 1;
+  }
   pid_t pid = fork();
   if (pid < 0) {
     fprintf(stderr, "failed to fork\n");
     return 1;
   }
   if (pid == 0) {
-    // child
-    // if (tacit_watch_pid(fd) < 0) {
-    //   fprintf(stderr, "failed to watch pid\n");
-    //   return 1;
-    // }
-    if (tacit_enable(fd) < 0) {
-      fprintf(stderr, "failed to enable tacit\n");
-      return 1;
-    }
     execvp(argv[1], &argv[1]);
     perror("execvp");
     return 127;

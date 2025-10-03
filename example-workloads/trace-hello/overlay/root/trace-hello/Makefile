@@ -12,7 +12,10 @@ hello: hello.c
 	${CC} ${CFLAGS} -o hello hello.c
 
 dump: ${TARGET}
-	${DUMP} -D ${TARGET} > ${TARGET}.dump
+	${DUMP} -d ${TARGET} > ${TARGET}.dump
+
+dump-symbols: ${TARGET}
+	${DUMP} -t ${TARGET} > ${TARGET}.symbols
 
 clean:
 	rm -f hello trace-submit
