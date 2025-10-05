@@ -23,8 +23,6 @@ struct tacit_log_record {
 #define TRACE_IOC_ENABLE     _IO(TRACE_IOC_MAGIC, 0)
 // Disable the trace encoder
 #define TRACE_IOC_DISABLE    _IO(TRACE_IOC_MAGIC, 1)
-// Set the context mode for the trace encoder
-#define TRACE_IOC_WATCH_PID   _IO(TRACE_IOC_MAGIC, 2)
 
 static inline int tacit_open(void) {
   const char *devpath = "/dev/tacit0";
@@ -37,10 +35,6 @@ static inline int tacit_enable(int fd) {
 
 static inline int tacit_disable(int fd) {
   return ioctl(fd, TRACE_IOC_DISABLE);
-}
-
-static inline int tacit_watch_pid(int fd) {
-  return ioctl(fd, TRACE_IOC_WATCH_PID);
 }
 
 static inline int tacit_close(int fd) {
