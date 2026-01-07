@@ -1,0 +1,64 @@
+diff --git a/arch/riscv/Kconfig b/arch/riscv/Kconfig
+index 5f72d048f58..f03721bd9cc 100644
+--- a/arch/riscv/Kconfig
++++ b/arch/riscv/Kconfig
+@@ -321,6 +321,16 @@ config ARCH_SPARSEMEM_ENABLE
+ config ARCH_SELECT_MEMORY_MODEL
+ 	def_bool ARCH_SPARSEMEM_ENABLE
+ 
++#swsok, to enaable probe interface for RISC-V
++config ARCH_MEMORY_PROBE
++	bool "Enable sysfs memory/probe interface"
++	depends on MEMORY_HOTPLUG
++	help
++	  This option enables a sysfs memory/probe interface for testing.
++	  See Documentation/admin-guide/mm/memory-hotplug.rst for more information.
++	  If you are unsure how to answer this question, answer N.
++
++
+ config ARCH_SUPPORTS_UPROBES
+ 	def_bool y
+ 
+diff --git a/scripts/mod/modpost.c b/scripts/mod/modpost.c
+index 5ca7c268294..d7927b3de23 100644
+--- a/scripts/mod/modpost.c
++++ b/scripts/mod/modpost.c
+@@ -1167,6 +1167,38 @@ static Elf_Addr addend_386_rel(uint32_t *location, unsigned int r_type)
+ 	return (Elf_Addr)(-1);
+ }
+ 
++#ifndef R_ARM_CALL
++#define R_ARM_CALL		28
++#endif
++
++#ifndef R_ARM_JUMP24
++#define R_ARM_JUMP24		29
++#endif
++
++#ifndef R_ARM_THM_JUMP24
++#define R_ARM_THM_JUMP24	30
++#endif
++
++#ifndef R_ARM_MOVW_ABS_NC
++#define R_ARM_MOVW_ABS_NC	43
++#endif
++
++#ifndef R_ARM_MOVT_ABS
++#define R_ARM_MOVT_ABS		44
++#endif
++
++#ifndef R_ARM_THM_MOVW_ABS_NC
++#define R_ARM_THM_MOVW_ABS_NC	47
++#endif
++
++#ifndef R_ARM_THM_MOVT_ABS
++#define R_ARM_THM_MOVT_ABS	48
++#endif
++
++#ifndef R_ARM_THM_JUMP19
++#define R_ARM_THM_JUMP19	51
++#endif
++
+ static int32_t sign_extend32(int32_t value, int index)
+ {
+ 	uint8_t shift = 31 - index;

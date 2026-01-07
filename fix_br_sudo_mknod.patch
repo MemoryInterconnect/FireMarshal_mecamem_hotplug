@@ -1,0 +1,19 @@
+diff --git a/fs/cpio/cpio.mk b/fs/cpio/cpio.mk
+index 00ab6a8f8..f71493f9f 100644
+--- a/fs/cpio/cpio.mk
++++ b/fs/cpio/cpio.mk
+@@ -17,12 +17,13 @@ else
+ # Add a pre-init script to mount it before running init
+ # We must have /dev/console very early, even before /init runs,
+ # for stdin/stdout/stderr
++# swsok, add sudo to mknod execution
+ define ROOTFS_CPIO_ADD_INIT
+ 	if [ ! -e $(TARGET_DIR)/init ]; then \
+ 		$(INSTALL) -m 0755 fs/cpio/init $(TARGET_DIR)/init; \
+ 	fi
+ 	mkdir -p $(TARGET_DIR)/dev
+-	mknod -m 0622 $(TARGET_DIR)/dev/console c 5 1
++	sudo mknod -m 0622 $(TARGET_DIR)/dev/console c 5 1
+ endef
+ 
+ endif # BR2_ROOTFS_DEVICE_CREATION_STATIC

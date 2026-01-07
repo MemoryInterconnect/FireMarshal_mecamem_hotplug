@@ -1,24 +1,8 @@
-# FireMarshal
+# FireMarshal_mecamem_hotplug
 
-FireMarshal is a workload generation tool for RISC-V based systems that automates constructing boot binaries and filesystem images and their evaluation.
-
-## Quick Links
-
-* **Stable Documentation**: https://firemarshal.readthedocs.io/en/latest/index.html
-* **Paper Publication**: https://ieeexplore.ieee.org/document/9408192
-* **Bugs and Feature Requests**: https://github.com/firesim/FireMarshal/issues
-* **General Questions, Help, Discussion**: https://groups.google.com/forum/#!forum/firesim
-* **Want to contribute?**: https://github.com/firesim/FireMarshal/blob/master/CONTRIBUTING.md
+This is a fork of firesim/FireMarshal to support hotplug function for MECA memory.
 
 ## Setup
-
-### *RECOMMENDED* Chipyard/FireSim Integration
-
-The easiest way to use FireMarshal is to run it via [Chipyard](https://chipyard.readthedocs.io/en/latest/) or [FireSim](https://docs.fires.im/en/latest/).
-However, this is not required.
-To run FireMarshal independently, follow along from the next section (Standalone setup).
-
-### Standalone Setup
 
 FireMarshal uses the [Conda](https://docs.conda.io/en/latest/) package manager to help manage system dependencies.
 This allows users to create an "environment" that holds system dependencies like ``make``, ``git``, etc.
@@ -45,38 +29,36 @@ You can also follow along with the ``guestmount`` [installation instructions fou
 
 ## Basic Usage
 
-If you only want to build bare-metal workloads, you can skip updating submodules.
-Otherwise, you should update the required submodules by running:
+Followind is the procedure to generate no-disk image for MECA.
 
 ```bash
 ./init-submodules.sh
 ```
 
-Building workloads:
+Patch to fix some errors related to FireMarshal and enable memory hotplug function for MECA memory.
 
 ```bash
-./marshal build br-base.json
+./fix_error_and_add_mem_probe_riscv.sh
+./fix_br_sudo_mknod.sh
+```
+
+Building no-disk image:
+
+```bash
+./marshal -v -d build br-base.json
 ```
 
 To run in qemu:
 
 ```bash
-./marshal launch br-base.json
+./marshal -d launch br-base.json
 ```
 
-To install into FireSim (assuming FireMarshal is setup within a Chipyard/FireSim installation):
+To flatten the no-disk image:
 
 ```bash
-./marshal install br-base.json
+./marshal -v -d install -t prototype br-base.json
+
+ls -alh images/*flat
 ```
 
-## Security Note
-
-Be advised that FireMarshal will run initialization scripts provided by workloads.
-These scripts will have all the permissions your user has, be sure to read all workloads carefully before building them.
-
-## Releases
-
-The master branch of this project contains the latest unstable version of FireMarshal.
-It should generally work correctly, but it may contain bugs or other inconsistencies from time to time.
-For stable releases, see the release git tags or GitHub releases page.
