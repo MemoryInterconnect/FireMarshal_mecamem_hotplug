@@ -59,6 +59,26 @@ To flatten the no-disk image:
 ```bash
 ./marshal -v -d install -t prototype br-base.json
 
-ls -alh images/*flat
+ls -alh images/prototype/br-base/*flat
+-rwxrwxr-x 1 swsok swsok 32M Jan  8 04:01 images/prototype/br-base/br-base-bin-nodisk-flat
 ```
 
+To write the image to SD card: (if SD card is /dev/sdc)
+
+```bash
+sudo dd if=images/prototype/br-base/br-base-bin-nodisk-flat of=/dev/sdc1 bs=4k
+```
+
+## Caution
+
+The default loading image size in the Chipyard design is 30MB. If your generated image exceeds this limit, the boot process will fail.
+
+To resolve this, you need to increase the maximum loading size in the Chipyard configuration. Modify the relevant parameter in your Chipyard design to accommodate the actual image size (e.g., 32MB or larger based on your flattened image size).
+
+Check your generated image size with:
+
+```bash
+ls -lh images/prototype/br-base/br-base-bin-nodisk-flat
+```
+
+Ensure that the Chipyard `BootROM` or SD card loader configuration supports loading an image of that size before attempting to boot.
