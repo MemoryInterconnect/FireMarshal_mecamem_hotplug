@@ -1,0 +1,477 @@
+/*
+ * omni_chardev_polling.c - OmniXtend Character Device Driver (Polling Version)
+ *
+ * Polling-based character device driver for direct access to OmniXtend
+ * remote memory via DMA controller with busy-wait completion detection.
+ *
+ * Copyright (C) 2024
+ * License: GPL v2
+ */
+
+#include <linux/module.h>
+#include <linux/kernel.h>
+#include <linux/fs.h>
+#include <linux/cdev.h>
+#include <linux/device.h>
+#include <linux/slab.h>
+#include <linux/uaccess.h>
+#include <linux/io.h>
+#include <linux/delay.h>
+
+#include "omni_chardev_polling.h"
+
+/* Enable debug output for register operations (set to false to disable) */
+#define DEBUG_REG_OPS false
+
+/* Global device pointer */
+static struct omni_chardev *g_omni_dev;
+
+/* Module parameters */
+static unsigned int omni_size_mb = DEFAULT_OMNI_SIZE_MB;
+module_param(omni_size_mb, uint, 0644);
+MODULE_PARM_DESC(omni_size_mb, "OmniXtend memory size in MB (default: 512)");
+
+/*****************************************************************************
+ * DMA Helper Functions
+ *****************************************************************************/
+
+static void dma_setup_transfer(struct omni_chardev *dev, u64 src, u64 dst, u32 len)
+{
+	omni_write_reg32_debug(dev->dma_base, DMA_SRC_ADDR_LO,
+			       (u32)(src & 0xFFFFFFFF), DEBUG_REG_OPS);
+	omni_write_reg32_debug(dev->dma_base, DMA_SRC_ADDR_HI,
+			       (u32)(src >> 32), DEBUG_REG_OPS);
+	omni_write_reg32_debug(dev->dma_base, DMA_DST_ADDR_LO,
+			       (u32)(dst & 0xFFFFFFFF), DEBUG_REG_OPS);
+	omni_write_reg32_debug(dev->dma_base, DMA_DST_ADDR_HI,
+			       (u32)(dst >> 32), DEBUG_REG_OPS);
+	omni_write_reg32_debug(dev->dma_base, DMA_LENGTH_LO, len, DEBUG_REG_OPS);
+	omni_write_reg32_debug(dev->dma_base, DMA_LENGTH_HI, 0, DEBUG_REG_OPS);
+}
+
+static void dma_start(struct omni_chardev *dev)
+{
+	omni_write_reg32_debug(dev->dma_base, DMA_CONTROL, 1, DEBUG_REG_OPS);
+}
+
+static u32 dma_read_status(struct omni_chardev *dev)
+{
+	return omni_read_reg32_debug(dev->dma_base, DMA_STATUS, DEBUG_REG_OPS);
+}
+
+static int omni_wait_for_dma(struct omni_chardev *dev)
+{
+	u32 status;
+	int poll_count = (DMA_TIMEOUT_MS * 1000) / DMA_POLL_INTERVAL_US;
+
+	while (poll_count-- > 0) {
+		status = dma_read_status(dev);
+		if (status & DMA_STATUS_DONE) {
+			return 0;
+		}
+		udelay(DMA_POLL_INTERVAL_US);
+	}
+
+	pr_err("DMA timeout after %d ms\n", DMA_TIMEOUT_MS);
+	atomic64_inc(&dev->dma_timeouts);
+	return -ETIMEDOUT;
+}
+
+/*****************************************************************************
+ * Memory Management
+ *****************************************************************************/
+
+static int omni_map_resources(struct omni_chardev *dev)
+{
+	dev->dma_base = ioremap(DMA_BASE_ADDR, 0x1000);
+	if (!dev->dma_base) {
+		pr_err("Failed to map DMA controller\n");
+		return -ENOMEM;
+	}
+
+	dev->omni_base = ioremap(OMNI_REMOTE_MEM_BASE, dev->omni_size_bytes);
+	if (!dev->omni_base) {
+		pr_err("Failed to map OmniXtend memory\n");
+		iounmap(dev->dma_base);
+		return -ENOMEM;
+	}
+
+	pr_info("Mapped DMA @ 0x%llx, OmniXtend @ 0x%llx\n",
+		DMA_BASE_ADDR, OMNI_REMOTE_MEM_BASE);
+
+	return 0;
+}
+
+static void omni_unmap_resources(struct omni_chardev *dev)
+{
+	if (dev->omni_base)
+		iounmap(dev->omni_base);
+	if (dev->dma_base)
+		iounmap(dev->dma_base);
+}
+
+static int omni_alloc_dma_buffer(struct omni_chardev *dev)
+{
+	dev->dma_buffer_size = DMA_BUFFER_SIZE;
+	dev->dma_buffer = kmalloc(dev->dma_buffer_size, GFP_KERNEL | GFP_DMA);
+
+	if (!dev->dma_buffer) {
+		pr_err("Failed to allocate DMA buffer (%zu bytes)\n",
+		       dev->dma_buffer_size);
+		return -ENOMEM;
+	}
+
+	dev->dma_buffer_phys = virt_to_phys(dev->dma_buffer);
+
+	pr_info("Allocated DMA buffer: %zu KB @ phys 0x%llx\n",
+		dev->dma_buffer_size / 1024,
+		(unsigned long long)dev->dma_buffer_phys);
+
+	return 0;
+}
+
+static void omni_free_dma_buffer(struct omni_chardev *dev)
+{
+	if (dev->dma_buffer) {
+		kfree(dev->dma_buffer);
+		dev->dma_buffer = NULL;
+	}
+}
+
+/*****************************************************************************
+ * Character Device File Operations
+ *****************************************************************************/
+
+static int omni_chardev_open(struct inode *inode, struct file *filp)
+{
+	struct omni_chardev *dev;
+
+	dev = container_of(inode->i_cdev, struct omni_chardev, cdev);
+
+	if (!mutex_trylock(&dev->dev_mutex)) {
+		pr_warn("Device already open\n");
+		return -EBUSY;
+	}
+
+	if (dev->device_open) {
+		mutex_unlock(&dev->dev_mutex);
+		return -EBUSY;
+	}
+
+	dev->device_open = true;
+	filp->private_data = dev;
+
+	mutex_unlock(&dev->dev_mutex);
+
+	pr_info("Device opened\n");
+	return 0;
+}
+
+static int omni_chardev_release(struct inode *inode, struct file *filp)
+{
+	struct omni_chardev *dev = filp->private_data;
+
+	mutex_lock(&dev->dev_mutex);
+	dev->device_open = false;
+	mutex_unlock(&dev->dev_mutex);
+
+	pr_info("Device closed\n");
+	return 0;
+}
+
+static ssize_t omni_chardev_read(struct file *filp, char __user *buf,
+				 size_t count, loff_t *f_pos)
+{
+	struct omni_chardev *dev = filp->private_data;
+	size_t bytes_read = 0;
+	size_t chunk_size;
+	u64 omni_addr;
+	int ret;
+	unsigned long flags;
+
+	if (*f_pos >= dev->omni_size_bytes)
+		return 0;
+
+	if (*f_pos + count > dev->omni_size_bytes)
+		count = dev->omni_size_bytes - *f_pos;
+
+	pr_debug("Reading %zu bytes at offset %lld\n", count, *f_pos);
+
+	while (bytes_read < count) {
+		chunk_size = min(count - bytes_read, dev->dma_buffer_size);
+		omni_addr = OMNI_REMOTE_MEM_BASE + *f_pos + bytes_read;
+
+		spin_lock_irqsave(&dev->dma_lock, flags);
+
+		omni_flush_dcache_range(omni_addr, chunk_size);
+
+		dma_setup_transfer(dev, omni_addr, dev->dma_buffer_phys, chunk_size);
+		dma_start(dev);
+
+		ret = omni_wait_for_dma(dev);
+
+		spin_unlock_irqrestore(&dev->dma_lock, flags);
+
+		if (ret) {
+			pr_err("DMA read timeout\n");
+			atomic64_inc(&dev->dma_errors);
+			return -EIO;
+		}
+
+		omni_flush_dcache_range(dev->dma_buffer_phys, chunk_size);
+
+		if (copy_to_user(buf + bytes_read, dev->dma_buffer, chunk_size)) {
+			pr_err("Failed to copy data to user\n");
+			return -EFAULT;
+		}
+
+		bytes_read += chunk_size;
+		atomic64_inc(&dev->dma_reads);
+	}
+
+	*f_pos += bytes_read;
+	return bytes_read;
+}
+
+static ssize_t omni_chardev_write(struct file *filp, const char __user *buf,
+				  size_t count, loff_t *f_pos)
+{
+	struct omni_chardev *dev = filp->private_data;
+	size_t bytes_written = 0;
+	size_t chunk_size;
+	u64 omni_addr;
+	int ret;
+	unsigned long flags;
+
+	if (*f_pos >= dev->omni_size_bytes)
+		return -ENOSPC;
+
+	if (*f_pos + count > dev->omni_size_bytes)
+		count = dev->omni_size_bytes - *f_pos;
+
+	pr_debug("Writing %zu bytes at offset %lld\n", count, *f_pos);
+
+	while (bytes_written < count) {
+		chunk_size = min(count - bytes_written, dev->dma_buffer_size);
+		omni_addr = OMNI_REMOTE_MEM_BASE + *f_pos + bytes_written;
+
+		if (copy_from_user(dev->dma_buffer, buf + bytes_written, chunk_size)) {
+			pr_err("Failed to copy data from user\n");
+			return -EFAULT;
+		}
+
+		spin_lock_irqsave(&dev->dma_lock, flags);
+
+		omni_flush_dcache_range(dev->dma_buffer_phys, chunk_size);
+
+		dma_setup_transfer(dev, dev->dma_buffer_phys, omni_addr, chunk_size);
+		dma_start(dev);
+
+		ret = omni_wait_for_dma(dev);
+
+		spin_unlock_irqrestore(&dev->dma_lock, flags);
+
+		if (ret) {
+			pr_err("DMA write timeout\n");
+			atomic64_inc(&dev->dma_errors);
+			return -EIO;
+		}
+
+		omni_flush_dcache_range(omni_addr, chunk_size);
+
+		bytes_written += chunk_size;
+		atomic64_inc(&dev->dma_writes);
+	}
+
+	*f_pos += bytes_written;
+	return bytes_written;
+}
+
+static loff_t omni_chardev_llseek(struct file *filp, loff_t offset, int whence)
+{
+	struct omni_chardev *dev = filp->private_data;
+	loff_t new_pos;
+
+	switch (whence) {
+	case SEEK_SET:
+		new_pos = offset;
+		break;
+	case SEEK_CUR:
+		new_pos = filp->f_pos + offset;
+		break;
+	case SEEK_END:
+		new_pos = dev->omni_size_bytes + offset;
+		break;
+	default:
+		return -EINVAL;
+	}
+
+	if (new_pos < 0 || new_pos > dev->omni_size_bytes)
+		return -EINVAL;
+
+	filp->f_pos = new_pos;
+	return new_pos;
+}
+
+static long omni_chardev_ioctl(struct file *filp, unsigned int cmd,
+			       unsigned long arg)
+{
+	struct omni_chardev *dev = filp->private_data;
+	struct omni_stats_ioctl stats;
+	unsigned long size;
+
+	switch (cmd) {
+	case OMNI_IOC_GET_SIZE:
+		size = dev->omni_size_bytes;
+		if (copy_to_user((void __user *)arg, &size, sizeof(size)))
+			return -EFAULT;
+		return 0;
+
+	case OMNI_IOC_GET_STATS:
+		stats.dma_reads = atomic64_read(&dev->dma_reads);
+		stats.dma_writes = atomic64_read(&dev->dma_writes);
+		stats.dma_errors = atomic64_read(&dev->dma_errors);
+		stats.dma_timeouts = atomic64_read(&dev->dma_timeouts);
+		stats.irq_count = atomic64_read(&dev->irq_count);
+
+		if (copy_to_user((void __user *)arg, &stats, sizeof(stats)))
+			return -EFAULT;
+		return 0;
+
+	case OMNI_IOC_RESET_STATS:
+		atomic64_set(&dev->dma_reads, 0);
+		atomic64_set(&dev->dma_writes, 0);
+		atomic64_set(&dev->dma_errors, 0);
+		atomic64_set(&dev->dma_timeouts, 0);
+		atomic64_set(&dev->irq_count, 0);
+		return 0;
+
+	default:
+		return -ENOTTY;
+	}
+}
+
+static const struct file_operations omni_chardev_fops = {
+	.owner = THIS_MODULE,
+	.open = omni_chardev_open,
+	.release = omni_chardev_release,
+	.read = omni_chardev_read,
+	.write = omni_chardev_write,
+	.llseek = omni_chardev_llseek,
+	.unlocked_ioctl = omni_chardev_ioctl,
+};
+
+/*****************************************************************************
+ * Module Initialization and Cleanup
+ *****************************************************************************/
+
+static int __init omni_chardev_init(void)
+{
+	struct omni_chardev *dev;
+	int ret;
+
+	pr_info("OmniXtend Character Device Driver v%s\n", OMNI_CHARDEV_VERSION);
+
+	dev = kzalloc(sizeof(*dev), GFP_KERNEL);
+	if (!dev)
+		return -ENOMEM;
+
+	g_omni_dev = dev;
+
+	dev->omni_size_bytes = (size_t)omni_size_mb * 1024 * 1024;
+	dev->device_open = false;
+
+	mutex_init(&dev->dev_mutex);
+	spin_lock_init(&dev->dma_lock);
+
+	atomic64_set(&dev->dma_reads, 0);
+	atomic64_set(&dev->dma_writes, 0);
+	atomic64_set(&dev->dma_errors, 0);
+	atomic64_set(&dev->dma_timeouts, 0);
+	atomic64_set(&dev->irq_count, 0);
+
+	ret = omni_map_resources(dev);
+	if (ret)
+		goto err_free_dev;
+
+	ret = omni_alloc_dma_buffer(dev);
+	if (ret)
+		goto err_unmap;
+
+	ret = alloc_chrdev_region(&dev->dev_num, 0, 1, OMNI_CHARDEV_NAME);
+	if (ret) {
+		pr_err("Failed to allocate device number: %d\n", ret);
+		goto err_free_dma;
+	}
+
+	cdev_init(&dev->cdev, &omni_chardev_fops);
+	dev->cdev.owner = THIS_MODULE;
+
+	ret = cdev_add(&dev->cdev, dev->dev_num, 1);
+	if (ret) {
+		pr_err("Failed to add cdev: %d\n", ret);
+		goto err_unregister_chrdev;
+	}
+
+	dev->class = class_create(OMNI_CLASS_NAME);
+	if (IS_ERR(dev->class)) {
+		ret = PTR_ERR(dev->class);
+		pr_err("Failed to create class: %d\n", ret);
+		goto err_cdev_del;
+	}
+
+	dev->device = device_create(dev->class, NULL, dev->dev_num,
+				    NULL, OMNI_CHARDEV_NAME);
+	if (IS_ERR(dev->device)) {
+		ret = PTR_ERR(dev->device);
+		pr_err("Failed to create device: %d\n", ret);
+		goto err_class_destroy;
+	}
+
+	pr_info("Device registered: major=%d, size=%zu MB\n",
+		MAJOR(dev->dev_num), dev->omni_size_bytes / (1024 * 1024));
+	pr_info("DMA buffer: %zu KB\n", dev->dma_buffer_size / 1024);
+
+	return 0;
+
+err_class_destroy:
+	class_destroy(dev->class);
+err_cdev_del:
+	cdev_del(&dev->cdev);
+err_unregister_chrdev:
+	unregister_chrdev_region(dev->dev_num, 1);
+err_free_dma:
+	omni_free_dma_buffer(dev);
+err_unmap:
+	omni_unmap_resources(dev);
+err_free_dev:
+	kfree(dev);
+	g_omni_dev = NULL;
+	return ret;
+}
+
+static void __exit omni_chardev_exit(void)
+{
+	struct omni_chardev *dev = g_omni_dev;
+
+	if (!dev)
+		return;
+
+	device_destroy(dev->class, dev->dev_num);
+	class_destroy(dev->class);
+	cdev_del(&dev->cdev);
+	unregister_chrdev_region(dev->dev_num, 1);
+	omni_free_dma_buffer(dev);
+	omni_unmap_resources(dev);
+	kfree(dev);
+
+	pr_info("Device unregistered\n");
+}
+
+module_init(omni_chardev_init);
+module_exit(omni_chardev_exit);
+
+MODULE_LICENSE("GPL v2");
+MODULE_AUTHOR("OmniXtend Team");
+MODULE_DESCRIPTION("OmniXtend Character Device Driver for RISC-V");
+MODULE_VERSION(OMNI_CHARDEV_VERSION);
