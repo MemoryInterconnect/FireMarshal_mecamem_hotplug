@@ -1,0 +1,240 @@
+/dts-v1/;
+
+/ {
+	#address-cells = <0x02>;
+	model = "ucb-bar,chipyard";
+	#size-cells = <0x02>;
+	compatible = "ucb-bar,chipyard-dev";
+
+	soc {
+		#address-cells = <0x02>;
+		#size-cells = <0x02>;
+		compatible = "ucb-bar,chipyard-soc\0simple-bus";
+		ranges;
+
+		clint@2000000 {
+			reg-names = "control";
+			interrupts-extended = <0x05 0x03 0x05 0x07>;
+			compatible = "riscv,clint0";
+			reg = <0x00 0x2000000 0x00 0x10000>;
+		};
+
+		sbus_clock {
+			clock-output-names = "sbus_clock";
+			#clock-cells = <0x00>;
+			clock-frequency = <0x5f5e100>;
+			compatible = "fixed-clock";
+		};
+
+		debug-controller@0 {
+			reg-names = "control";
+			interrupts-extended = <0x05 0xffff>;
+			debug-attach = "jtag";
+			compatible = "sifive,debug-013\0riscv,debug-013";
+			reg = <0x00 0x00 0x00 0x1000>;
+		};
+
+		LogRegisterNode@9026000 {
+			reg-names = "control";
+			compatible = "OMNIXTEND_ETRI, my-ETRI";
+			reg = <0x00 0x9026000 0x00 0x1000>;
+		};
+
+		error-device@3000 {
+			compatible = "sifive,error0";
+			reg = <0x00 0x3000 0x00 0x1000>;
+		};
+
+		clock-gater@100000 {
+			reg-names = "control";
+			reg = <0x00 0x100000 0x00 0x1000>;
+		};
+
+		my-ETRI@200000000 {
+			compatible = "OMNIXTEND_ETRI, my-ETRI";
+			reg = <0x02 0x00 0x02 0x00>;
+			phandle = <0x03>;
+		};
+
+		fbus_clock {
+			clock-output-names = "fbus_clock";
+			#clock-cells = <0x00>;
+			clock-frequency = <0x5f5e100>;
+			compatible = "fixed-clock";
+		};
+
+		pbus_clock {
+			clock-output-names = "pbus_clock";
+			#clock-cells = <0x00>;
+			clock-frequency = <0x5f5e100>;
+			compatible = "fixed-clock";
+			phandle = <0x07>;
+		};
+
+		omni-dma@9000000 {
+			reg-names = "control";
+			interrupts = <0x01>;
+			interrupt-parent = <0x06>;
+			compatible = "etri,omni-dma";
+			reg = <0x00 0x9000000 0x00 0x1000>;
+		};
+
+		boot-address-reg@1000 {
+			reg-names = "control";
+			reg = <0x00 0x1000 0x00 0x1000>;
+		};
+
+		interrupt-controller@c000000 {
+			reg-names = "control";
+			interrupts-extended = <0x05 0xffffffff 0x05 0x09>;
+			compatible = "riscv,plic0";
+			#interrupt-cells = <0x01>;
+			reg = <0x00 0xc000000 0x00 0x4000000>;
+			phandle = <0x06>;
+			riscv,ndev = <0x03>;
+			riscv,max-priority = <0x03>;
+			interrupt-controller;
+		};
+
+		tile-reset-setter@110000 {
+			reg-names = "control";
+			reg = <0x00 0x110000 0x00 0x1000>;
+		};
+
+		spi@64001000 {
+			#address-cells = <0x01>;
+			reg-names = "control";
+			interrupts = <0x03>;
+			clocks = <0x07>;
+			#size-cells = <0x00>;
+			interrupt-parent = <0x06>;
+			compatible = "sifive,spi0";
+			reg = <0x00 0x64001000 0x00 0x1000>;
+
+			mmc@0 {
+				spi-max-frequency = <0xf4240>;
+				voltage-ranges = <0xce4 0xce4>;
+				compatible = "mmc-spi-slot";
+				disable-wp;
+				reg = <0x00>;
+			};
+		};
+
+		cbus_clock {
+			clock-output-names = "cbus_clock";
+			#clock-cells = <0x00>;
+			clock-frequency = <0x5f5e100>;
+			compatible = "fixed-clock";
+		};
+
+		cache-controller@2010000 {
+			cache-size = <0x40000>;
+			reg-names = "control";
+			cache-level = <0x02>;
+			sifive,mshr-count = <0x07>;
+			cache-sets = <0x200>;
+			cache-unified;
+			compatible = "sifive,inclusivecache0\0cache";
+			next-level-cache = <0x02 0x03 0x04>;
+			reg = <0x00 0x2010000 0x00 0x1000>;
+			phandle = <0x01>;
+			cache-block-size = <0x40>;
+		};
+
+		rom@10000 {
+			reg-names = "mem";
+			compatible = "sifive,rom0";
+			reg = <0x00 0x10000 0x00 0x10000>;
+		};
+
+		serial@64000000 {
+			reg-names = "control";
+			interrupts = <0x02>;
+			clocks = <0x07>;
+			interrupt-parent = <0x06>;
+			compatible = "sifive,uart0";
+			reg = <0x00 0x64000000 0x00 0x1000>;
+		};
+
+		mbus_clock {
+			clock-output-names = "mbus_clock";
+			#clock-cells = <0x00>;
+			clock-frequency = <0x5f5e100>;
+			compatible = "fixed-clock";
+		};
+	};
+
+	memory@70000000 {
+		device_type = "memory";
+		status = "disabled";
+		reg = <0x00 0x70000000 0x00 0x10000>;
+		phandle = <0x04>;
+	};
+
+	memory@80000000 {
+		device_type = "memory";
+		reg = <0x00 0x80000000 0x00 0x80000000>;
+		phandle = <0x02>;
+	};
+
+	aliases {
+		serial0 = "/soc/serial@64000000";
+	};
+
+	chosen {
+		stdout-path = "/soc/serial@64000000";
+	};
+
+	cpus {
+		#address-cells = <0x01>;
+		#size-cells = <0x00>;
+		timebase-frequency = <0x186a0>;
+
+		cpu@0 {
+			i-tlb-sets = <0x01>;
+			d-cache-block-size = <0x40>;
+			hardware-exec-breakpoint-count = <0x01>;
+			clock-frequency = <0x00>;
+			device_type = "cpu";
+			compatible = "sifive,rocket0\0riscv";
+			mmu-type = "riscv,sv39";
+			status = "okay";
+			d-cache-size = <0x8000>;
+			riscv,pmpgranularity = <0x04>;
+			next-level-cache = <0x01>;
+			riscv,pmpregions = <0x08>;
+			i-cache-size = <0x8000>;
+			timebase-frequency = <0x186a0>;
+			reg = <0x00>;
+			d-cache-sets = <0x40>;
+			i-cache-block-size = <0x40>;
+			i-cache-sets = <0x40>;
+			d-tlb-size = <0x20>;
+			riscv,isa = "rv64imafdcbzicsr_zifencei_zihpm_zfh_zba_zbb_zbs_xrocket";
+			tlb-split;
+			i-tlb-size = <0x20>;
+			d-tlb-sets = <0x01>;
+
+			interrupt-controller {
+				compatible = "riscv,cpu-intc";
+				#interrupt-cells = <0x01>;
+				phandle = <0x05>;
+				interrupt-controller;
+			};
+		};
+	};
+
+	reserved-memory {
+		#address-cells = <0x02>;
+		#size-cells = <0x02>;
+		ranges;
+
+		mmode_resv0@80040000 {
+			reg = <0x00 0x80040000 0x00 0x20000>;
+		};
+
+		mmode_resv1@80000000 {
+			reg = <0x00 0x80000000 0x00 0x40000>;
+		};
+	};
+};
